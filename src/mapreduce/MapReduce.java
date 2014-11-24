@@ -1,5 +1,6 @@
 package mapreduce;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -9,129 +10,100 @@ import java.util.Map;
 
 public class MapReduce {
 
-    public static void main(String[] args) {
+    public static void mapWork() throws IOException {
 
-                // the problem:
-                // from here (INPUT)
-                // "file1.txt" => "foo foo bar cat dog dog"
-        // "file2.txt" => "foo house cat cat dog"
-        // "file3.txt" => "foo foo foo bird"
-                // we want to go to here (OUTPUT)
-                // "foo" => { "file1.txt" => 2, "file3.txt" => 3, "file2.txt" => 1 }
-        // "bar" => { "file1.txt" => 1 }
-        // "cat" => { "file2.txt" => 2, "file1.txt" => 1 }
-        // "dog" => { "file2.txt" => 1, "file1.txt" => 2 }
-        // "house" => { "file2.txt" => 1 }
-        // "bird" => { "file3.txt" => 1 }
-                // in plain English we want to
-                // Given a set of files with contents
-        // we want to index them by word 
-        // so I can return all files that contain a given word
-        // together with the number of occurrences of that word
-        // without any sorting
-                ////////////
-        // INPUT:
-        ///////////
-        // HasMap containing file: name, contents
-        Map<String, String> input = new HashMap<>();
-        input.put("file1.txt", "foo foo bar cat dog dog");
-        input.put("file2.txt", "foo house cat cat dog");
-        input.put("file3.txt", "foo foo foo bird");
+        // Output HasMap containing 
+        final Map<String, Map<String, Integer>> output = new HashMap<>();
 
-        // APPROACH #3: Distributed MapReduce
-        {
-            final Map<String, Map<String, Integer>> output = new HashMap<>();
+        // MAP:
+        final List<MappedItem> mappedItems = new LinkedList<>();
 
-            // MAP:
-            final List<MappedItem> mappedItems = new LinkedList<>();
+        final MapCallback<String, MappedItem> mapCallback = new MapCallback<String, MappedItem>() {
+            @Override
+            public synchronized void mapDone(String file, List<MappedItem> results) {
+                mappedItems.addAll(results);
+            }
+        };
 
-            final MapCallback<String, MappedItem> mapCallback = new MapCallback<String, MappedItem>() {
+        List<Thread> mapCluster = new ArrayList<>(ReadFiles.input.size());
+
+        Iterator<Map.Entry<String, String>> inputIter = ReadFiles.input.entrySet().iterator();
+        while (inputIter.hasNext()) {
+            Map.Entry<String, String> entry = inputIter.next();
+            final String file = entry.getKey();
+            final String contents = entry.getValue();
+
+            Thread t = new Thread(new Runnable() {
                 @Override
-                public synchronized void mapDone(String file, List<MappedItem> results) {
-                    mappedItems.addAll(results);
+                public void run() {
+                    map(file, contents, mapCallback);
                 }
-            };
-
-            List<Thread> mapCluster = new ArrayList<>(input.size());
-
-            Iterator<Map.Entry<String, String>> inputIter = input.entrySet().iterator();
-            while (inputIter.hasNext()) {
-                Map.Entry<String, String> entry = inputIter.next();
-                final String file = entry.getKey();
-                final String contents = entry.getValue();
-
-                Thread t = new Thread(new Runnable() {
-                    @Override
-                    public void run() {
-                        map(file, contents, mapCallback);
-                    }
-                });
-                mapCluster.add(t);
-                t.start();
-            }
-
-            // wait for mapping phase to be over:
-            for (Thread t : mapCluster) {
-                try {
-                    t.join();
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                }
-            }
-
-                        // GROUP:
-            Map<String, List<String>> groupedItems = new HashMap<>();
-
-            Iterator<MappedItem> mappedIter = mappedItems.iterator();
-            while (mappedIter.hasNext()) {
-                MappedItem item = mappedIter.next();
-                String word = item.getWord();
-                String file = item.getFile();
-                List<String> list = groupedItems.get(word);
-                if (list == null) {
-                    list = new LinkedList<>();
-                    groupedItems.put(word, list);
-                }
-                list.add(file);
-            }
-
-                        // REDUCE:
-            final ReduceCallback<String, String, Integer> reduceCallback = new ReduceCallback<String, String, Integer>() {
-                @Override
-                public synchronized void reduceDone(String k, Map<String, Integer> v) {
-                    output.put(k, v);
-                }
-            };
-
-            List<Thread> reduceCluster = new ArrayList<>(groupedItems.size());
-
-            Iterator<Map.Entry<String, List<String>>> groupedIter = groupedItems.entrySet().iterator();
-            while (groupedIter.hasNext()) {
-                Map.Entry<String, List<String>> entry = groupedIter.next();
-                final String word = entry.getKey();
-                final List<String> list = entry.getValue();
-
-                Thread t = new Thread(new Runnable() {
-                    @Override
-                    public void run() {
-                        reduce(word, list, reduceCallback);
-                    }
-                });
-                reduceCluster.add(t);
-                t.start();
-            }
-
-            // wait for reducing phase to be over:
-            for (Thread t : reduceCluster) {
-                try {
-                    t.join();
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                }
-            }
-
-            System.out.println(output);
+            });
+            mapCluster.add(t);
+            t.start();
         }
+
+        // wait for mapping phase to be over:
+        for (Thread t : mapCluster) {
+            try {
+                t.join();
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        // GROUP:
+        Map<String, List<String>> groupedItems = new HashMap<>();
+
+        Iterator<MappedItem> mappedIter = mappedItems.iterator();
+        while (mappedIter.hasNext()) {
+            MappedItem item = mappedIter.next();
+            String word = item.getWord();
+            String file = item.getFile();
+            List<String> list = groupedItems.get(word);
+            if (list == null) {
+                list = new LinkedList<>();
+                groupedItems.put(word, list);
+            }
+            list.add(file);
+        }
+
+        // REDUCE:
+        final ReduceCallback<String, String, Integer> reduceCallback = new ReduceCallback<String, String, Integer>() {
+            @Override
+            public synchronized void reduceDone(String k, Map<String, Integer> v) {
+                output.put(k, v);
+            }
+        };
+
+        List<Thread> reduceCluster = new ArrayList<>(groupedItems.size());
+
+        Iterator<Map.Entry<String, List<String>>> groupedIter = groupedItems.entrySet().iterator();
+        while (groupedIter.hasNext()) {
+            Map.Entry<String, List<String>> entry = groupedIter.next();
+            final String word = entry.getKey();
+            final List<String> list = entry.getValue();
+
+            Thread t = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    reduce(word, list, reduceCallback);
+                }
+            });
+            reduceCluster.add(t);
+            t.start();
+        }
+
+        // wait for reducing phase to be over:
+        for (Thread t : reduceCluster) {
+            try {
+                t.join();
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        System.out.println(output);
     }
 
     public static void map(String file, String contents, List<MappedItem> mappedItems) {
