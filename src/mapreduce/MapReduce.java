@@ -9,10 +9,16 @@ import java.util.List;
 import java.util.Map;
 
 public class MapReduce {
-
+    /*
+     * Called by ReadFiles.getFiles()
+     * Description:
+     */
     public static void mapWork() throws IOException {
 
-        // Output HasMap containing 
+        System.out.println("Now running MapReduce.mapWork()");
+        ReadFiles.input.put("file1.txt", "foo foo bar cat dog dog");
+
+        // Output HashMap containing 
         final Map<String, Map<String, Integer>> output = new HashMap<>();
 
         // MAP:
@@ -36,7 +42,7 @@ public class MapReduce {
             Thread t = new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    map(file, contents, mapCallback);
+                    Functions.map(file, contents, mapCallback);
                 }
             });
             mapCluster.add(t);
@@ -87,7 +93,7 @@ public class MapReduce {
             Thread t = new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    reduce(word, list, reduceCallback);
+                    Functions.reduce(word, list, reduceCallback);
                 }
             });
             reduceCluster.add(t);
@@ -106,80 +112,4 @@ public class MapReduce {
         System.out.println(output);
     }
 
-    public static void map(String file, String contents, List<MappedItem> mappedItems) {
-        String[] words = contents.trim().split("\\s+");
-        for (String word : words) {
-            mappedItems.add(new MappedItem(word, file));
-        }
-    }
-
-    public static void reduce(String word, List<String> list, Map<String, Map<String, Integer>> output) {
-        Map<String, Integer> reducedList = new HashMap<>();
-        list.stream().forEach((file) -> {
-            Integer occurrences = reducedList.get(file);
-            if (occurrences == null) {
-                reducedList.put(file, 1);
-            } else {
-                reducedList.put(file, occurrences + 1);
-            }
-        });
-        output.put(word, reducedList);
-    }
-
-    public static interface MapCallback<E, V> {
-
-        public void mapDone(E key, List<V> values);
-    }
-
-    public static void map(String file, String contents, MapCallback<String, MappedItem> callback) {
-        String[] words = contents.trim().split("\\s+");
-        List<MappedItem> results = new ArrayList<>(words.length);
-        for (String word : words) {
-            results.add(new MappedItem(word, file));
-        }
-        callback.mapDone(file, results);
-    }
-
-    public static interface ReduceCallback<E, K, V> {
-
-        public void reduceDone(E e, Map<K, V> results);
-    }
-
-    public static void reduce(String word, List<String> list, ReduceCallback<String, String, Integer> callback) {
-
-        Map<String, Integer> reducedList = new HashMap<>();
-        list.stream().forEach((file) -> {
-            Integer occurrences = reducedList.get(file);
-            if (occurrences == null) {
-                reducedList.put(file, 1);
-            } else {
-                reducedList.put(file, occurrences + 1);
-            }
-        });
-        callback.reduceDone(word, reducedList);
-    }
-
-    private static class MappedItem {
-
-        private final String word;
-        private final String file;
-
-        public MappedItem(String word, String file) {
-            this.word = word;
-            this.file = file;
-        }
-
-        public String getWord() {
-            return word;
-        }
-
-        public String getFile() {
-            return file;
-        }
-
-        @Override
-        public String toString() {
-            return "[\"" + word + "\",\"" + file + "\"]";
-        }
-    }
 }
